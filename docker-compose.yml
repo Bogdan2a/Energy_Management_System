@@ -1,0 +1,149 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"   # Traefik will listen on port 80 for HTTP requests
+      - "8080:8080" # Traefik dashboard
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro" # Grant access to Docker
+    labels:
+      - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.entrypoints=web"
+
+  mysql-users:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: bogdi0711  
+      MYSQL_DATABASE: users            
+    volumes:
+      - mysql_users_data:/var/lib/mysql 
+      - ./initdb.d:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pbogdi0711"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-devices:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: bogdi0711
+      MYSQL_DATABASE: devices           
+    volumes:
+      - mysql_devices_data:/var/lib/mysql 
+      - ./initdb.d:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pbogdi0711"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-monitoring:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: bogdi0711  
+      MYSQL_DATABASE: monitoring            
+    volumes:
+      - mysql_monitoring_data:/var/lib/mysql 
+      - ./initdb.d:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pbogdi0711"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-microservice:
+    build:
+      context: ./UserMicroservice
+      dockerfile: Dockerfile
+    depends_on:
+      mysql-users:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      DB_IP: mysql-users
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: bogdi0711
+      DB_DBNAME: users
+    labels:
+      - "traefik.http.routers.user.rule=PathPrefix(`/api/users`)"
+      - "traefik.http.services.user.loadbalancer.server.port=8080"
+
+  device-microservice:
+    build:
+      context: ./DeviceMicroservice
+      dockerfile: Dockerfile
+    depends_on:
+      mysql-devices:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      DB_IP: mysql-devices
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: bogdi0711
+      DB_DBNAME: devices
+    labels:
+      - "traefik.http.routers.device.rule=PathPrefix(`/api/devices`)"
+      - "traefik.http.services.device.loadbalancer.server.port=8081"
+
+  monitoring-microservice:
+    build:
+      context: ./MonitoringMicroservice
+      dockerfile: Dockerfile
+    depends_on:
+      mysql-monitoring:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      DB_IP: mysql-monitoring
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: bogdi0711
+      DB_DBNAME: monitoring
+    labels:
+      - "traefik.http.routers.monitoring.rule=PathPrefix(`/api/monitoring`)"
+      - "traefik.http.services.monitoring.loadbalancer.server.port=8082"
+
+  chat-microservice:
+    build:
+      context: ./ChatMicroservice
+      dockerfile: Dockerfile
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    labels:
+      - "traefik.http.routers.chat.rule=PathPrefix(`/chat`)"
+      - "traefik.http.services.chat.loadbalancer.server.port=8083"
+
+  frontend:
+    build: ./Frontend/frontend_ds
+    labels:
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=4200"
+
+volumes:
+  mysql_users_data:    
+  mysql_devices_data:
+  mysql_monitoring_data:
