@@ -1,6 +1,6 @@
 # Energy management system
 
-Web-based system desiged to monitor and analyze energy consumption.
+Web-based system designed to monitor and analyze energy consumption.
 
 It features:
 
